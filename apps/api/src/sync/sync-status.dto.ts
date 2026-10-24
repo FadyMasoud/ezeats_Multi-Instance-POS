@@ -2,13 +2,14 @@ import type { CheckRow, PosErrorKind, PosSyncRow, SyncState } from '../db/schema
 
 /**
  * Operator-facing status. Derived from the stored state plus lease/failure counters, so it never
- * contradicts the backend model:
- *   awaiting_payment / not_required  -> no sync row (check open, or cancelled before payment)
+ * contradicts the backend model. For active rows, first match wins:
  *   processing          -> a worker currently holds the lease
- *   pending / retrying  -> state=pending, without / with consecutive failures
+ *   retrying            -> the last attempt failed (any active state); waiting for backoff
+ *   pending             -> state=pending
  *   reconciling         -> state=reconciling (looking up a possibly-created order)
  *   cancellation_pending-> state=cancelling
- *   synced, cancelled, failed -> same as state
+ * Otherwise: synced, cancelled, failed mirror the state; awaiting_payment / not_required mean
+ * there is no sync row (check open, or cancelled before payment).
  */
 export type SyncDisplayStatus =
   | 'awaiting_payment'
@@ -21,6 +22,9 @@ export type SyncDisplayStatus =
   | 'synced'
   | 'cancelled'
   | 'failed';
+
+/** List filter: a display status, or `in_progress` = processing + pending + reconciling + cancellation_pending. */
+export type SyncStatusFilter = SyncDisplayStatus | 'in_progress';
 
 export interface SyncErrorDto {
   kind: PosErrorKind;
@@ -64,9 +68,8 @@ const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
 export function displayStatusOf(row: PosSyncRow, now: Date): SyncDisplayStatus {
   const leased = row.leaseUntil !== null && row.leaseUntil > now;
   if (ACTIVE.has(row.state) && leased) return 'processing';
+  if (ACTIVE.has(row.state) && row.consecutiveFailures > 0) return 'retrying';
   switch (row.state) {
-    case 'pending':
-      return row.consecutiveFailures > 0 ? 'retrying' : 'pending';
     case 'cancelling':
       return 'cancellation_pending';
     default:

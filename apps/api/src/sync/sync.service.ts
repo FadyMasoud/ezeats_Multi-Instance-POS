@@ -13,14 +13,14 @@ import {
 import { nextAction } from './sync-machine';
 import { snapshotColumns, toSnapshot } from './sync-processor';
 import {
-  SyncDisplayStatus,
   SyncStatusDto,
+  SyncStatusFilter,
   retryBlockedReason,
   toSyncStatus,
 } from './sync-status.dto';
 
 export interface SyncListQuery {
-  status?: SyncDisplayStatus;
+  status?: SyncStatusFilter;
   restaurantId?: string;
   errorKind?: PosErrorKind;
   q?: string;
@@ -38,8 +38,11 @@ export interface SyncSummary {
   paidChecks: number;
   cancelledChecks: number;
   synced: number;
+  /** Active syncs being processed or waiting without a failure; matches status=in_progress. */
   pending: number;
+  /** Active syncs waiting for backoff after a failure; matches status=retrying. Disjoint from pending. */
   retrying: number;
+  /** Breakdown of active syncs by state (overlaps pending/retrying). */
   reconciling: number;
   cancellationPending: number;
   failed: number;
@@ -151,8 +154,10 @@ export class SyncService {
         (count(*) FILTER (WHERE c.status = 'paid'))::int AS "paidChecks",
         (count(*) FILTER (WHERE c.status = 'cancelled'))::int AS "cancelledChecks",
         (count(*) FILTER (WHERE s.state = 'synced'))::int AS "synced",
-        (count(*) FILTER (WHERE s.state = 'pending' AND s.consecutive_failures = 0))::int AS "pending",
-        (count(*) FILTER (WHERE s.state IN ${ACTIVE_STATES} AND s.consecutive_failures > 0))::int AS "retrying",
+        (count(*) FILTER (WHERE s.state IN ${ACTIVE_STATES}
+          AND (s.lease_until > now() OR s.consecutive_failures = 0)))::int AS "pending",
+        (count(*) FILTER (WHERE s.state IN ${ACTIVE_STATES}
+          AND (s.lease_until IS NULL OR s.lease_until <= now()) AND s.consecutive_failures > 0))::int AS "retrying",
         (count(*) FILTER (WHERE s.state = 'reconciling'))::int AS "reconciling",
         (count(*) FILTER (WHERE s.state = 'cancelling'))::int AS "cancellationPending",
         (count(*) FILTER (WHERE s.state = 'failed'))::int AS "failed",
@@ -210,8 +215,12 @@ export class SyncService {
   }
 }
 
-function statusFilter(status: SyncDisplayStatus | undefined): SQL | null {
-  const leased = sql`(${posSync.leaseUntil} IS NOT NULL AND ${posSync.leaseUntil} > now())`;
+const LEASED = sql`(${posSync.leaseUntil} IS NOT NULL AND ${posSync.leaseUntil} > now())`;
+const ACTIVE = sql`${posSync.state} IN ${ACTIVE_STATES}`;
+/** SQL twin of displayStatusOf(): same precedence (processing, then retrying, then state). */
+const IDLE_NO_FAILURE = sql`NOT ${LEASED} AND ${posSync.consecutiveFailures} = 0`;
+
+function statusFilter(status: SyncStatusFilter | undefined): SQL | null {
   switch (status) {
     case undefined:
       return null;
@@ -219,16 +228,18 @@ function statusFilter(status: SyncDisplayStatus | undefined): SQL | null {
       return sql`${posSync.checkId} IS NULL AND ${checks.status} = 'open'`;
     case 'not_required':
       return sql`${posSync.checkId} IS NULL AND ${checks.status} = 'cancelled'`;
+    case 'in_progress':
+      return sql`${ACTIVE} AND (${LEASED} OR ${posSync.consecutiveFailures} = 0)`;
     case 'processing':
-      return sql`${posSync.state} IN ${ACTIVE_STATES} AND ${leased}`;
-    case 'pending':
-      return sql`${posSync.state} = 'pending' AND ${posSync.consecutiveFailures} = 0 AND NOT ${leased}`;
+      return sql`${ACTIVE} AND ${LEASED}`;
     case 'retrying':
-      return sql`${posSync.state} = 'pending' AND ${posSync.consecutiveFailures} > 0 AND NOT ${leased}`;
+      return sql`${ACTIVE} AND NOT ${LEASED} AND ${posSync.consecutiveFailures} > 0`;
+    case 'pending':
+      return sql`${posSync.state} = 'pending' AND ${IDLE_NO_FAILURE}`;
     case 'reconciling':
-      return sql`${posSync.state} = 'reconciling' AND NOT ${leased}`;
+      return sql`${posSync.state} = 'reconciling' AND ${IDLE_NO_FAILURE}`;
     case 'cancellation_pending':
-      return sql`${posSync.state} = 'cancelling' AND NOT ${leased}`;
+      return sql`${posSync.state} = 'cancelling' AND ${IDLE_NO_FAILURE}`;
     case 'synced':
     case 'cancelled':
     case 'failed':

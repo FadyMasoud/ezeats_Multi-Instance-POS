@@ -3,11 +3,12 @@ import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { ChecksService } from '../checks/checks.service';
 import { type PosErrorKind, posErrorKindEnum } from '../db/schema';
-import type { SyncDisplayStatus } from '../sync/sync-status.dto';
+import type { SyncStatusFilter } from '../sync/sync-status.dto';
 import { SyncService } from '../sync/sync.service';
 import { AdminGuard } from './admin.guard';
 
-const DISPLAY_STATUSES: SyncDisplayStatus[] = [
+const STATUS_FILTERS: SyncStatusFilter[] = [
+  'in_progress',
   'awaiting_payment',
   'not_required',
   'processing',
@@ -22,8 +23,8 @@ const DISPLAY_STATUSES: SyncDisplayStatus[] = [
 
 export class SyncListQueryDto {
   @IsOptional()
-  @IsIn(DISPLAY_STATUSES)
-  status?: SyncDisplayStatus;
+  @IsIn(STATUS_FILTERS)
+  status?: SyncStatusFilter;
 
   @IsOptional()
   @IsString()
