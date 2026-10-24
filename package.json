@@ -1,0 +1,44 @@
+{
+  "name": "ezeats-pos-sync",
+  "private": true,
+  "version": "1.0.0",
+  "description": "EZeats check -> restaurant POS synchronization (NestJS + PostgreSQL outbox)",
+  "workspaces": ["apps/api", "apps/fake-pos", "apps/admin"],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "npm run build -w apps/api -w apps/fake-pos -w apps/admin",
+    "typecheck": "npm run typecheck -w apps/api -w apps/fake-pos -w apps/admin && tsc -p tests/tsconfig.json --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "npm run test:unit && npm run test:int",
+    "test:unit": "vitest run --project unit",
+    "test:int": "vitest run --project integration",
+    "test:chaos": "tsx tests/chaos/run-chaos.ts",
+    "check": "npm run lint && npm run typecheck && npm run test:unit && npm run db:check",
+    "db:generate": "npm run db:generate -w apps/api --",
+    "db:check": "npm run db:check -w apps/api",
+    "db:migrate": "npm run migrate -w apps/api",
+    "dev:pos": "npm run dev -w apps/fake-pos",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:admin": "npm run dev -w apps/admin",
+    "docs:pdf": "node docs/build-pdf.mjs",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@swc/core": "^1.10.1",
+    "@types/node": "^20.17.10",
+    "@types/supertest": "^6.0.2",
+    "drizzle-orm": "^0.38.4",
+    "husky": "^9.1.7",
+    "marked": "^15.0.4",
+    "puppeteer-core": "^23.10.4",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "~5.7.2",
+    "unplugin-swc": "^1.5.1",
+    "vitest": "^2.1.8"
+  }
+}
