@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config';
-import { DB, Database, Tx } from '../db/database';
+import { Database, Tx, WORKER_DB } from '../db/database';
 
 export type RateDecision = { allowed: true } | { allowed: false; retryAt: Date };
 
@@ -16,7 +16,7 @@ export type RateDecision = { allowed: true } | { allowed: false; retryAt: Date }
 export class PosRateLimiter {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Inject(DB) private readonly db: Database,
+    @Inject(WORKER_DB) private readonly db: Database,
   ) {}
 
   private get windowMs(): number {

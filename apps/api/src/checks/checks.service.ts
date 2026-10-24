@@ -41,34 +41,34 @@ export class ChecksService {
   }
 
   /**
-   * Marks the check paid and enqueues its POS sync in one transaction. No POS call happens here,
-   * so the response time does not depend on the POS at all. Idempotent for an already-paid check.
+   * Marks the check paid and enqueues its POS sync atomically. No POS call happens here, so the
+   * response time does not depend on the POS at all. Idempotent for an already-paid check.
+   *
+   * One statement (a single implicit transaction): the UPDATE only matches an open check, and the
+   * outbox INSERT only runs for the row it updated. Two round trips in total keep pay fast even
+   * when the pool is busy.
    */
   async pay(id: string): Promise<CheckResponse> {
-    return this.db.transaction(async (tx) => {
-      const check = await this.lockCheck(tx, id);
-      if (check.status === 'cancelled') {
-        throw new ConflictException({
-          code: 'CHECK_CANCELLED',
-          message: 'a cancelled check cannot be paid',
-        });
-      }
-      let current = check;
-      if (check.status === 'open') {
-        const [paid] = await tx
-          .update(checks)
-          .set({ status: 'paid', paidAt: sql`now()`, updatedAt: sql`now()` })
-          .where(eq(checks.id, id))
-          .returning();
-        if (!paid) throw new Error('update returned no row');
-        current = paid;
-        await tx
-          .insert(posSync)
-          .values({ checkId: id, restaurantId: check.restaurantId, externalRef: id })
-          .onConflictDoNothing();
-      }
-      return toCheckResponse(current, await this.items(tx, id));
-    });
+    const paid = await this.db.execute<{ id: string }>(sql`
+      WITH paid AS (
+        UPDATE checks SET status = 'paid', paid_at = now(), updated_at = now()
+        WHERE id = ${id} AND status = 'open'
+        RETURNING id, restaurant_id
+      ), enqueued AS (
+        INSERT INTO pos_sync (check_id, restaurant_id, external_ref)
+        SELECT id, restaurant_id, id::text FROM paid
+        ON CONFLICT (check_id) DO NOTHING
+      )
+      SELECT id FROM paid`);
+
+    const check = await this.get(id); // 404 if it does not exist
+    if (paid.rows.length === 0 && check.status === 'cancelled') {
+      throw new ConflictException({
+        code: 'CHECK_CANCELLED',
+        message: 'a cancelled check cannot be paid',
+      });
+    }
+    return check;
   }
 
   /**

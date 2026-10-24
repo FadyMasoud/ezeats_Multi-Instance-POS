@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { asc, eq, sql } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config';
-import { DB, Database, Tx } from '../db/database';
+import { Database, Tx, WORKER_DB } from '../db/database';
 import { PosSyncRow, checkItems, checks, posSync, posSyncAttempts } from '../db/schema';
 import { PosClient } from './pos-client';
 import { PosRateLimiter } from './rate-limiter';
@@ -70,7 +70,7 @@ export class SyncProcessor {
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Inject(DB) private readonly db: Database,
+    @Inject(WORKER_DB) private readonly db: Database,
     private readonly pos: PosClient,
     private readonly rateLimiter: PosRateLimiter,
   ) {}

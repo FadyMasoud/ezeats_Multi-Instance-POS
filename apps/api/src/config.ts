@@ -32,6 +32,8 @@ export interface AppConfig {
   instanceId: string;
   port: number;
   databaseUrl: string;
+  dbPoolSize: number;
+  workerDbPoolSize: number;
   posBaseUrl: string;
   adminToken: string;
   worker: WorkerConfig;
@@ -59,6 +61,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     instanceId: env.INSTANCE_ID || `${hostname()}-${process.pid}`,
     port: int(env, 'PORT', 3000),
     databaseUrl: required(env, 'DATABASE_URL'),
+    dbPoolSize: int(env, 'DB_POOL_SIZE', 10),
+    workerDbPoolSize: int(env, 'WORKER_DB_POOL_SIZE', 5),
     posBaseUrl: (env.POS_BASE_URL || 'http://localhost:4000').replace(/\/+$/, ''),
     adminToken: env.ADMIN_TOKEN ?? '',
     worker: {

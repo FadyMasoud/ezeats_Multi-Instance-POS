@@ -90,6 +90,8 @@ export function testConfig(posBaseUrl: string, overrides: ApiOverrides = {}): Ap
     instanceId: 'test-a',
     port: 0,
     databaseUrl: url,
+    dbPoolSize: 5,
+    workerDbPoolSize: 5,
     posBaseUrl,
     adminToken: ADMIN_TOKEN,
     ...overrides,
