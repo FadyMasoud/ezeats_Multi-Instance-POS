@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker>
+    <style>
+      .h{font-weight:600;fill:#0f172a}
+      .ll{stroke:#cbd5e1;stroke-width:1.5;stroke-dasharray:4 4}
+      .m{stroke:#334155;stroke-width:1.4;fill:none;marker-end:url(#a)}
+      .x{fill:#334155;font-size:11.5px}
+      .note{fill:#fff7ed;stroke:#fdba74}
+    </style>
+  </defs>
+  <rect x="60" y="20" width="140" height="34" rx="8" fill="#fff7ed" stroke="#c2410c"/><text x="130" y="42" text-anchor="middle" class="h">api-1 worker</text>
+  <rect x="330" y="20" width="140" height="34" rx="8" fill="#eff6ff" stroke="#1d4ed8"/><text x="400" y="42" text-anchor="middle" class="h">PostgreSQL</text>
+  <rect x="580" y="20" width="140" height="34" rx="8" fill="#f5f3ff" stroke="#6d28d9"/><text x="650" y="42" text-anchor="middle" class="h">POS</text>
+  <rect x="740" y="20" width="140" height="34" rx="8" fill="#fff7ed" stroke="#c2410c"/><text x="810" y="42" text-anchor="middle" class="h">api-2 worker</text>
+  <line x1="130" y1="54" x2="130" y2="460" class="ll"/><line x1="400" y1="54" x2="400" y2="460" class="ll"/>
+  <line x1="650" y1="54" x2="650" y2="460" class="ll"/><line x1="810" y1="54" x2="810" y2="460" class="ll"/>
+
+  <path d="M130 80 L396 80" class="m"/><text x="140" y="74" class="x">claim row (lease, SKIP LOCKED)</text>
+  <path d="M130 112 L396 112" class="m"/><text x="140" y="106" class="x">tx: rate token + COMMIT create_sent_at</text>
+  <path d="M130 144 L646 144" class="m"/><text x="300" y="138" class="x">POST /orders {externalRef = checkId}</text>
+  <rect x="660" y="152" width="120" height="22" rx="4" class="note"/><text x="720" y="167" text-anchor="middle" class="x">order P1 created</text>
+  <text x="140" y="196" class="x">… no answer within 10 s → timeout (ambiguous)</text>
+  <path d="M130 216 L396 216" class="m"/><text x="140" y="210" class="x">tx: keep create_sent_at, state=reconciling, retry in 2 s</text>
+  <text x="150" y="250" class="x" fill="#b91c1c">✗ api-1 may now die; the lease expires after 30 s</text>
+  <path d="M806 280 L404 280" class="m"/><text x="560" y="274" class="x">claim (any instance)</text>
+  <path d="M806 312 L654 312" class="m"/><text x="660" y="306" class="x">GET /orders?externalRef</text>
+  <path d="M654 340 L806 340" class="m"/><text x="660" y="334" class="x">[P1 open]</text>
+  <path d="M806 372 L404 372" class="m"/><text x="420" y="366" class="x">tx (lease token checked): posOrderId=P1, state=synced</text>
+  <rect x="20" y="400" width="860" height="52" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="34" y="422" class="x">If the lookup is empty: trusted only if it was SENT ≥ 15 s after create_sent_at → create again; otherwise look again later.</text>
+  <text x="34" y="440" class="x">If it returns 2+ open orders: keep the oldest, cancel the rest. Never POST /orders again while create_sent_at is set.</text>
+</svg>

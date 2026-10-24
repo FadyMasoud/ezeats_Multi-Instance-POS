@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker>
+    <style>
+      .st{stroke-width:1.6;rx:18}
+      .n{font-weight:600;fill:#0f172a}
+      .e{fill:#334155;font-size:11.5px}
+      .l{stroke:#475569;stroke-width:1.4;fill:none;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect x="40" y="60" width="140" height="44" class="st" fill="#eff6ff" stroke="#1d4ed8"/>
+  <text x="110" y="87" text-anchor="middle" class="n">pending</text>
+  <rect x="370" y="60" width="160" height="44" class="st" fill="#f5f3ff" stroke="#6d28d9"/>
+  <text x="450" y="87" text-anchor="middle" class="n">reconciling</text>
+  <rect x="720" y="60" width="140" height="44" class="st" fill="#ecfdf5" stroke="#15803d"/>
+  <text x="790" y="87" text-anchor="middle" class="n">synced</text>
+  <rect x="720" y="240" width="140" height="44" class="st" fill="#fffbeb" stroke="#b45309"/>
+  <text x="790" y="267" text-anchor="middle" class="n">cancelling</text>
+  <rect x="370" y="330" width="160" height="44" class="st" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="450" y="357" text-anchor="middle" class="n">cancelled</text>
+  <rect x="40" y="240" width="140" height="44" class="st" fill="#fef2f2" stroke="#b91c1c"/>
+  <text x="110" y="267" text-anchor="middle" class="n">failed</text>
+  <text x="110" y="30" text-anchor="middle" class="e">pay → row inserted</text>
+  <path d="M110 36 L110 58" class="l"/>
+
+  <path d="M180 74 C 450 10, 600 10, 718 74" class="l"/>
+  <text x="450" y="14" text-anchor="middle" class="e">create 201 → posOrderId</text>
+  <path d="M180 92 L368 92" class="l"/>
+  <text x="274" y="84" text-anchor="middle" class="e">timeout / reset / 502–504</text>
+  <path d="M370 100 L182 100" class="l" stroke-dasharray="4 3"/>
+  <text x="274" y="117" text-anchor="middle" class="e">empty lookup ≥ settle window</text>
+  <path d="M530 82 L718 82" class="l"/>
+  <text x="624" y="74" text-anchor="middle" class="e">lookup finds open order</text>
+
+  <path d="M790 104 L790 238" class="l"/>
+  <text x="800" y="175" class="e">check cancelled</text>
+  <path d="M720 270 C 640 300, 600 330, 532 348" class="l"/>
+  <text x="640" y="330" class="e">cancel 200</text>
+  <path d="M450 104 L450 328" class="l"/>
+  <text x="458" y="210" class="e">cancel requested +</text>
+  <text x="458" y="226" class="e">nothing found (settled)</text>
+  <path d="M530 98 L722 244" class="l"/>
+  <text x="625" y="130" class="e">cancel requested +</text>
+  <text x="625" y="146" class="e">order found</text>
+  <path d="M150 104 C 200 250, 300 340, 368 350" class="l"/>
+  <text x="222" y="186" class="e">cancel before create_sent_at</text>
+  <text x="222" y="202" class="e">(POS never contacted)</text>
+
+  <path d="M90 104 L90 238" class="l"/>
+  <text x="8" y="144" class="e">4xx (422 clears</text>
+  <text x="8" y="160" class="e">create_sent_at)</text>
+  <text x="8" y="176" class="e">/ budget exhausted</text>
+  <path d="M130 284 C 140 320, 60 320, 70 286" class="l"/>
+  <text x="30" y="340" class="e">operator retry → back to the</text>
+  <text x="30" y="356" class="e">state nextAction() computes</text>
+  <text x="30" y="395" class="e" font-style="italic">Any active state: 500/timeout → same state + backoff ("retrying"); lease held → "processing".</text>
+</svg>

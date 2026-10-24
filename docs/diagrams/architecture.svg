@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker>
+    <style>
+      .box{fill:#fff;stroke:#94a3b8;stroke-width:1.5;rx:10}
+      .api{fill:#fff7ed;stroke:#c2410c}
+      .db{fill:#eff6ff;stroke:#1d4ed8}
+      .pos{fill:#f5f3ff;stroke:#6d28d9}
+      .t{font-weight:600;fill:#0f172a}
+      .s{fill:#475569;font-size:11.5px}
+      .l{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .d{stroke-dasharray:5 4}
+    </style>
+  </defs>
+  <rect x="20" y="40" width="150" height="60" class="box"/>
+  <text x="95" y="66" text-anchor="middle" class="t">Customer app</text>
+  <text x="95" y="84" text-anchor="middle" class="s">create · pay · cancel</text>
+  <rect x="20" y="140" width="150" height="60" class="box"/>
+  <text x="95" y="166" text-anchor="middle" class="t">Operator (browser)</text>
+  <text x="95" y="184" text-anchor="middle" class="s">POS Sync Operations UI</text>
+
+  <rect x="220" y="80" width="150" height="80" class="box"/>
+  <text x="295" y="108" text-anchor="middle" class="t">nginx :8080</text>
+  <text x="295" y="126" text-anchor="middle" class="s">load balancer /api/*</text>
+  <text x="295" y="142" text-anchor="middle" class="s">+ static admin UI</text>
+
+  <rect x="430" y="30" width="200" height="120" class="box api"/>
+  <text x="530" y="56" text-anchor="middle" class="t">api-1 (NestJS)</text>
+  <text x="530" y="78" text-anchor="middle" class="s">HTTP handlers → pool DB</text>
+  <text x="530" y="96" text-anchor="middle" class="s">SyncWorker → pool WORKER_DB</text>
+  <text x="530" y="114" text-anchor="middle" class="s">claim · step · lease</text>
+  <text x="530" y="132" text-anchor="middle" class="s">PosClient (10 s timeout)</text>
+
+  <rect x="430" y="180" width="200" height="120" class="box api"/>
+  <text x="530" y="206" text-anchor="middle" class="t">api-2 (NestJS)</text>
+  <text x="530" y="228" text-anchor="middle" class="s">identical; any instance can</text>
+  <text x="530" y="246" text-anchor="middle" class="s">be SIGKILLed at any time</text>
+  <text x="530" y="264" text-anchor="middle" class="s">no in-memory shared state</text>
+
+  <rect x="400" y="340" width="260" height="110" class="box db"/>
+  <text x="530" y="366" text-anchor="middle" class="t">PostgreSQL</text>
+  <text x="530" y="388" text-anchor="middle" class="s">checks · check_items</text>
+  <text x="530" y="406" text-anchor="middle" class="s">pos_sync (outbox + state machine)</text>
+  <text x="530" y="424" text-anchor="middle" class="s">pos_sync_attempts · pos_rate_events</text>
+  <text x="530" y="442" text-anchor="middle" class="s">pos_restaurant_throttle</text>
+
+  <rect x="720" y="120" width="160" height="110" class="box pos"/>
+  <text x="800" y="146" text-anchor="middle" class="t">Fake POS :4000</text>
+  <text x="800" y="166" text-anchor="middle" class="s">not idempotent</text>
+  <text x="800" y="184" text-anchor="middle" class="s">500 · 429 · 422</text>
+  <text x="800" y="202" text-anchor="middle" class="s">slow · timeout-after-create</text>
+  <text x="800" y="220" text-anchor="middle" class="s">5 req / 10 s / restaurant</text>
+
+  <path d="M170 70 L218 105" class="l"/>
+  <path d="M170 170 L218 140" class="l"/>
+  <path d="M370 110 L428 90" class="l"/>
+  <path d="M370 130 L428 220" class="l"/>
+  <path d="M430 125 H412 V338" class="l"/>
+  <path d="M560 300 L560 338" class="l"/>
+  <path d="M630 90 L718 150" class="l d"/>
+  <path d="M630 240 L718 200" class="l d"/>
+  <text x="648" y="62" class="s">POS calls,</text>
+  <text x="648" y="77" class="s">never in a tx</text>
+  <text x="300" y="325" class="s">pay = 1 statement</text>
+  <text x="575" y="320" class="s">leases, SKIP LOCKED,</text>
+  <text x="575" y="334" class="s">advisory-lock limiter</text>
+</svg>
