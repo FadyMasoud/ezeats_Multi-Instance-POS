@@ -9,7 +9,7 @@ export default defineWorkspace([
     plugins,
     test: {
       name: 'unit',
-      include: ['apps/*/src/**/*.spec.ts'],
+      include: ['apps/*/src/**/*.spec.ts', 'tests/hooks/**/*.spec.ts'],
       environment: 'node',
     },
   },

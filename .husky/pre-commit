@@ -1,0 +1,2 @@
+# Same gate as the CI "check" job: lint, typecheck, unit tests (incl. hook tests), migration drift.
+npm run check
