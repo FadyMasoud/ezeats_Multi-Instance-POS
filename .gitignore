@@ -9,3 +9,4 @@ coverage/
 docs/.build/
 .claude/settings.local.json
 .cache/
+apps/api/.drift-*/

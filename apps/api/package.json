@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "migrate": "tsx src/db/migrate.ts",
     "db:generate": "drizzle-kit generate",
-    "db:check": "drizzle-kit check",
+    "db:check": "drizzle-kit check && node scripts/check-migration-drift.mjs",
     "dev": "tsx watch src/main.ts"
   },
   "dependencies": {
