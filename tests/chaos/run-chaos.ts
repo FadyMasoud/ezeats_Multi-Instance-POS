@@ -66,7 +66,8 @@ class DockerCluster implements Cluster {
     execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
   }
   async start() {
-    this.sh('docker compose up -d --build --wait');
+    // No --wait: the one-shot migrate service exits by design; health is awaited over HTTP below.
+    this.sh('docker compose up -d --build');
   }
   async kill(i: number) {
     this.sh(`docker compose kill -s SIGKILL ${this.services[i]}`);
