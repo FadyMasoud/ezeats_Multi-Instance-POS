@@ -25,8 +25,10 @@ describe('multiple API instances, restarts and rate limits (real Postgres)', () 
 
   beforeAll(async () => {
     pos = await startFakePos();
-    a = await startApi(pos.url, { instanceId: 'api-a' });
-    b = await startApi(pos.url, { instanceId: 'api-b' });
+    // These tests are about concurrency, not the retry budget: with 30% 500s + 15% timeouts, a
+    // budget of 6 consecutive failures would park ~1% of checks as failed by design.
+    a = await startApi(pos.url, { instanceId: 'api-a', worker: { maxConsecutiveFailures: 25 } });
+    b = await startApi(pos.url, { instanceId: 'api-b', worker: { maxConsecutiveFailures: 25 } });
   });
   afterAll(async () => {
     await a.close();
@@ -78,7 +80,7 @@ describe('multiple API instances, restarts and rate limits (real Postgres)', () 
         expect(status.state).toBe('cancelled');
         expect(open).toHaveLength(0);
       } else {
-        expect(status.state).toBe('synced');
+        expect(status.state, JSON.stringify(status.lastError)).toBe('synced');
         expect(open).toHaveLength(1);
       }
     }
