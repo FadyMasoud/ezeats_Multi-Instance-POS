@@ -2,16 +2,24 @@ import { describe, expect, it } from 'vitest';
 import {
   type PosError,
   type PosOutcome,
+  type RetryPolicy,
   type StepContext,
+  type StepResult,
   type SyncSnapshot,
   applyOutcome,
   backoffDelayMs,
+  decideStep,
   nextAction,
   stateFor,
 } from './sync-machine';
 
 const NOW = new Date('2026-01-01T12:00:00.000Z');
-const ctx: StepContext = { now: NOW, ambiguousSettleMs: 15_000, reconcileDelayMs: 2_000 };
+const ctx: StepContext = {
+  now: NOW,
+  requestStartedAt: null,
+  ambiguousSettleMs: 15_000,
+  reconcileDelayMs: 2_000,
+};
 const secondsAgo = (s: number) => new Date(NOW.getTime() - s * 1000);
 
 const fresh: SyncSnapshot = {
@@ -291,6 +299,141 @@ describe('applyOutcome: cancel', () => {
     const action = { kind: 'cancel', posOrderId: 'p1', reason: 'cancel_requested' } as const;
     const r = applyOutcome(s, action, { action: 'cancel', ok: false, error: err({}) }, ctx);
     expect(nextAction(r.snapshot)).toEqual(action);
+  });
+});
+
+describe('settle window is measured from when the lookup was sent (review S1)', () => {
+  const lookup = { kind: 'lookup' } as const;
+  const empty: PosOutcome = { action: 'lookup', ok: true, orders: [] };
+
+  it('a slow empty lookup that started inside the window does not clear createSentAt', () => {
+    // create sent at t=1, lookup sent at t=13 (inside 15 s), response processed at t=16
+    const s = { ...fresh, createSentAt: secondsAgo(15) };
+    const r = applyOutcome(s, lookup, empty, { ...ctx, requestStartedAt: secondsAgo(3) });
+    expect(r.snapshot.createSentAt).toEqual(s.createSentAt);
+    expect(nextAction(r.snapshot)).toEqual({ kind: 'lookup' });
+    expect(r.delayMs).toBe(0); // window has passed by now: look again right away
+  });
+
+  it('an empty lookup sent after the window clears createSentAt', () => {
+    const s = { ...fresh, createSentAt: secondsAgo(20) };
+    const r = applyOutcome(s, lookup, empty, { ...ctx, requestStartedAt: secondsAgo(4) });
+    expect(r.snapshot.createSentAt).toBeNull();
+  });
+});
+
+describe('ambiguous 4xx keeps the create "maybe sent" (review B1)', () => {
+  const create = { kind: 'create' } as const;
+  const sent = { ...fresh, createSentAt: secondsAgo(1) };
+  const outcome: PosOutcome = {
+    action: 'create',
+    ok: false,
+    error: err({ kind: 'rejected', status: 408, definitelyNotApplied: false }),
+  };
+
+  it('parks as failed but a later cancel or retry looks the order up first', () => {
+    const r = applyOutcome(sent, create, outcome, ctx);
+    expect(r.snapshot.createSentAt).toEqual(sent.createSentAt);
+    expect(decideStep(0, create, r, policy).state).toBe('failed');
+    expect(nextAction({ ...r.snapshot, cancelRequested: true })).toEqual({ kind: 'lookup' });
+    expect(nextAction(r.snapshot)).toEqual({ kind: 'lookup' });
+  });
+});
+
+const policy: RetryPolicy = {
+  maxConsecutiveFailures: 3,
+  backoffBaseMs: 1_000,
+  backoffMaxMs: 30_000,
+};
+
+describe('decideStep (retry policy)', () => {
+  const create = { kind: 'create' } as const;
+  const result = (failure: StepResult['failure'], snapshot = fresh, delayMs = 0): StepResult => ({
+    snapshot,
+    delayMs,
+    failure,
+  });
+  const failure = (over: Partial<NonNullable<StepResult['failure']>>) => ({
+    kind: 'server_error' as const,
+    status: 500,
+    message: 'boom',
+    permanent: false,
+    countsTowardLimit: true,
+    ...over,
+  });
+
+  it('resets the failure count on success', () => {
+    const d = decideStep(
+      2,
+      create,
+      result(null, { ...fresh, posOrderId: 'p', posOrderStatus: 'open' }),
+      policy,
+    );
+    expect(d).toMatchObject({ state: 'synced', consecutiveFailures: 0, error: null });
+  });
+
+  it('backs off on transient failures and stops when the budget is exhausted', () => {
+    const d1 = decideStep(0, create, result(failure({})), policy, () => 1);
+    expect(d1).toMatchObject({ state: 'pending', consecutiveFailures: 1, delayMs: 1_000 });
+    const d3 = decideStep(2, create, result(failure({})), policy);
+    expect(d3.state).toBe('failed');
+    expect(d3.error?.kind).toBe('retries_exhausted');
+    expect(d3.error?.message).toMatch(/server_error: boom/);
+  });
+
+  it('stops immediately on a permanent rejection and keeps its category', () => {
+    const d = decideStep(
+      0,
+      create,
+      result(failure({ kind: 'rejected', status: 422, permanent: true })),
+      policy,
+    );
+    expect(d).toMatchObject({ state: 'failed', error: { kind: 'rejected', status: 422 } });
+  });
+
+  it('rate limiting neither consumes the budget nor parks the sync', () => {
+    const d = decideStep(
+      2,
+      create,
+      result(
+        failure({ kind: 'rate_limited', status: 429, countsTowardLimit: false }),
+        fresh,
+        4_000,
+      ),
+      policy,
+    );
+    expect(d).toMatchObject({ state: 'pending', consecutiveFailures: 2, delayMs: 4_000 });
+  });
+
+  it('never parks a step whose next action is done (e.g. 422 on a check cancelled meanwhile)', () => {
+    const d = decideStep(
+      0,
+      create,
+      result(failure({ kind: 'rejected', status: 422, permanent: true }), {
+        ...fresh,
+        cancelRequested: true,
+      }),
+      policy,
+    );
+    expect(d.state).toBe('cancelled');
+  });
+
+  it('names the duplicate when cancelling it fails', () => {
+    const cancelDup = { kind: 'cancel', posOrderId: 'p2', reason: 'duplicate' } as const;
+    const snapshot = {
+      ...fresh,
+      posOrderId: 'p1',
+      posOrderStatus: 'open' as const,
+      extraOrderIds: ['p2'],
+    };
+    const d = decideStep(
+      0,
+      cancelDup,
+      result(failure({ kind: 'rejected', status: 404, permanent: true }), snapshot),
+      policy,
+    );
+    expect(d.state).toBe('failed');
+    expect(d.error?.message).toMatch(/duplicate POS order p2/);
   });
 });
 

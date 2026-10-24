@@ -45,8 +45,9 @@ export class ChecksService {
    * response time does not depend on the POS at all. Idempotent for an already-paid check.
    *
    * One statement (a single implicit transaction): the UPDATE only matches an open check, and the
-   * outbox INSERT only runs for the row it updated. Two round trips in total keep pay fast even
-   * when the pool is busy.
+   * outbox INSERT only runs for the row it updated. Three short round trips in total (this
+   * statement plus the check and items reads for the response) keep pay fast even when the pool
+   * is busy.
    */
   async pay(id: string): Promise<CheckResponse> {
     const paid = await this.db.execute<{ id: string }>(sql`

@@ -107,6 +107,12 @@ export interface StepResult {
 
 export interface StepContext {
   now: Date;
+  /**
+   * DB clock just before the request was sent (end of beginStep). An empty lookup describes the
+   * POS when it read its store, which is no later than when we finish, so the settle age must be
+   * measured from here, not from `now` (a slow lookup response must not "age" the evidence).
+   */
+  requestStartedAt: Date | null;
   ambiguousSettleMs: number;
   reconcileDelayMs: number;
 }
@@ -161,14 +167,16 @@ function applyLookup(s: SyncSnapshot, orders: PosOrderSummary[], ctx: StepContex
   }
 
   const sentAt = s.createSentAt?.getTime() ?? 0;
-  const age = ctx.now.getTime() - sentAt;
+  const observedAt = (ctx.requestStartedAt ?? ctx.now).getTime();
+  const age = observedAt - sentAt;
   if (age >= ctx.ambiguousSettleMs) {
     // Nothing open under our externalRef long after the last create could have landed:
     // treat the create as not applied. A fresh create is now safe (or, if cancelled, nothing to do).
     return ok({ ...s, createSentAt: null, posOrderId: null, posOrderStatus: null });
   }
   // Too early to trust an empty result; look again once the settle window has passed.
-  return { snapshot: s, delayMs: ctx.ambiguousSettleMs - age, failure: null };
+  const remaining = ctx.ambiguousSettleMs - age - (ctx.now.getTime() - observedAt);
+  return { snapshot: s, delayMs: Math.max(0, remaining), failure: null };
 }
 
 function applyError(
@@ -202,6 +210,78 @@ function applyError(
 
 function ok(snapshot: SyncSnapshot): StepResult {
   return { snapshot, delayMs: 0, failure: null };
+}
+
+export interface RetryPolicy {
+  maxConsecutiveFailures: number;
+  backoffBaseMs: number;
+  backoffMaxMs: number;
+}
+
+export interface StepDecision {
+  snapshot: SyncSnapshot;
+  state: SyncState;
+  consecutiveFailures: number;
+  delayMs: number;
+  /** Error to record as last_error (null on success; the previous one is then kept). */
+  error: { kind: PosErrorKind; status: number | null; message: string } | null;
+}
+
+/**
+ * Turns a step result into what gets persisted: failure counting, backoff, and when to stop.
+ * A step whose next action is "done" never parks as failed, even if the call itself failed
+ * (e.g. a 422 create on a check that was cancelled meanwhile simply ends cancelled).
+ */
+export function decideStep(
+  previousFailures: number,
+  action: PosAction,
+  result: StepResult,
+  policy: RetryPolicy,
+  random: () => number = Math.random,
+): StepDecision {
+  const next = nextAction(result.snapshot);
+  const { failure } = result;
+  if (!failure) {
+    return {
+      snapshot: result.snapshot,
+      state: stateFor(next),
+      consecutiveFailures: 0,
+      delayMs: result.delayMs,
+      error: null,
+    };
+  }
+
+  const consecutiveFailures = previousFailures + (failure.countsTowardLimit ? 1 : 0);
+  const delayMs = failure.countsTowardLimit
+    ? Math.max(
+        result.delayMs,
+        backoffDelayMs(consecutiveFailures, policy.backoffBaseMs, policy.backoffMaxMs, random),
+      )
+    : result.delayMs;
+  // Name the duplicate so an operator can see the main order is fine but an extra one is open.
+  const context =
+    action.kind === 'cancel' && action.reason === 'duplicate'
+      ? `Could not cancel duplicate POS order ${action.posOrderId}: `
+      : '';
+  let error: StepDecision['error'] = {
+    kind: failure.kind,
+    status: failure.status,
+    message: `${context}${failure.message}`,
+  };
+  let state: SyncState = stateFor(next);
+
+  const exhausted = consecutiveFailures >= policy.maxConsecutiveFailures;
+  if (next.kind !== 'done' && (failure.permanent || exhausted)) {
+    state = 'failed';
+    if (!failure.permanent) {
+      error = {
+        kind: 'retries_exhausted',
+        status: failure.status,
+        message: `Gave up after ${consecutiveFailures} consecutive failures. Last: ${failure.kind}: ${error.message}`,
+      };
+    }
+  }
+  return { snapshot: result.snapshot, state, consecutiveFailures, delayMs, error };
 }
 
 /** Exponential backoff with "equal jitter": half fixed, half random, capped. */

@@ -384,8 +384,14 @@ function verify(
   const failures: string[] = [];
 
   for (const id of ids) {
-    const open = (byRef.get(id) ?? []).filter((o) => o.status === 'open');
+    const all = byRef.get(id) ?? [];
+    const open = all.filter((o) => o.status === 'open');
     const status = statusById.get(id);
+    // The fake POS never creates on a 500 and commits before any delay, so a second order for the
+    // same check is a duplicate create, even if the sync later cancelled ("healed") it.
+    if (all.length > 1) {
+      failures.push(`check ${id} was created ${all.length} times on the POS (duplicate create)`);
+    }
     if (cancelled.has(id)) {
       if (open.length !== 0)
         failures.push(`cancelled check ${id} has ${open.length} open POS order(s)`);
@@ -420,7 +426,9 @@ function verify(
     log(`CHAOS TEST FAILED (${failures.length} violation(s))`);
     return false;
   }
-  log('CHAOS TEST PASSED: exactly one open order per kept check, none for cancelled, no orphans');
+  log(
+    'CHAOS TEST PASSED: exactly one POS order per kept check (open), at most one per cancelled check (none open), no duplicates, no orphans',
+  );
   return true;
 }
 

@@ -22,6 +22,7 @@ export class SyncWorker implements OnApplicationBootstrap, BeforeApplicationShut
   private timer: NodeJS.Timeout | null = null;
   private stopping = false;
   private lastPrune = 0;
+  private currentCycle: Promise<void> = Promise.resolve();
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -41,13 +42,16 @@ export class SyncWorker implements OnApplicationBootstrap, BeforeApplicationShut
   async beforeApplicationShutdown(): Promise<void> {
     this.stopping = true;
     if (this.timer) clearTimeout(this.timer);
-    // Let in-flight POS calls finish and record their outcome; anything cut off is recovered
-    // by another instance once the lease expires.
-    await Promise.allSettled([...this.inFlight]);
+    // A cycle may be mid-claim: wait for it, so the steps it starts are awaited too (the DB
+    // pools close right after this hook). Then let in-flight POS calls finish and record their
+    // outcome; anything cut off is recovered by another instance once the lease expires.
+    await this.currentCycle;
+    await this.drain();
   }
 
   /** Runs one claim/dispatch cycle; exposed for tests that drive the worker deterministically. */
   async tick(): Promise<number> {
+    if (this.stopping) return 0;
     const capacity = this.config.worker.maxConcurrency - this.inFlight.size;
     const claims = await this.processor.claimDue(capacity);
     for (const claim of claims) {
@@ -69,7 +73,9 @@ export class SyncWorker implements OnApplicationBootstrap, BeforeApplicationShut
 
   private schedule(delayMs: number): void {
     if (this.stopping) return;
-    this.timer = setTimeout(() => void this.loop(), delayMs);
+    this.timer = setTimeout(() => {
+      this.currentCycle = this.loop();
+    }, delayMs);
   }
 
   private async loop(): Promise<void> {

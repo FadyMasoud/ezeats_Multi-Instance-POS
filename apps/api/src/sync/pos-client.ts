@@ -85,6 +85,8 @@ export class PosClient {
         headers: body === undefined ? undefined : { 'content-type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(this.config.worker.posTimeoutMs),
+        // A followed 307/308 would re-send a create to another URL inside one "attempt".
+        redirect: 'manual',
       });
       const text = await response.text();
       return { status: response.status, body: safeJson(text), headers: response.headers };
@@ -151,14 +153,18 @@ export class PosClient {
       };
     }
     if (status >= 400) {
+      // Permanent either way (stop retrying, show an operator), but only 422 is a contractual
+      // "nothing was created". A 400/404/408/409 may come from a proxy or gateway after the POS
+      // already created the order, so the create must stay "maybe sent" and be looked up first.
       return {
         kind: 'rejected',
         status,
         message: detail,
-        definitelyNotApplied: true,
+        definitelyNotApplied: status === 422,
         retryAfterMs: null,
       };
     }
+    // 1xx/3xx (redirects are not followed): we cannot tell what happened.
     return unexpected(status, `unexpected status ${status}`);
   }
 }

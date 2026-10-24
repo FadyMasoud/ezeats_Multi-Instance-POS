@@ -2,17 +2,16 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { asc, eq, sql } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config';
 import { Database, Tx, WORKER_DB } from '../db/database';
-import { PosSyncRow, checkItems, checks, posSync, posSyncAttempts } from '../db/schema';
+import { PosSyncRow, SyncState, checkItems, checks, posSync, posSyncAttempts } from '../db/schema';
 import { PosClient } from './pos-client';
 import { PosRateLimiter } from './rate-limiter';
 import {
   NextAction,
   PosAction,
   PosOutcome,
-  StepFailure,
   SyncSnapshot,
   applyOutcome,
-  backoffDelayMs,
+  decideStep,
   nextAction,
   stateFor,
 } from './sync-machine';
@@ -24,7 +23,14 @@ export interface Claim {
 
 type Begin =
   | { kind: 'skip'; reason: string }
-  | { kind: 'call'; action: PosAction; row: PosSyncRow; payload: CreatePayload | null };
+  | {
+      kind: 'call';
+      action: PosAction;
+      row: PosSyncRow;
+      payload: CreatePayload | null;
+      /** DB clock at the end of beginStep, i.e. no later than the request leaving. */
+      requestStartedAt: Date;
+    };
 
 interface CreatePayload {
   externalRef: string;
@@ -45,7 +51,10 @@ export function toSnapshot(row: PosSyncRow): SyncSnapshot {
 
 /** Columns that mirror a snapshot, plus the timestamps implied by the resulting state. */
 export function snapshotColumns(s: SyncSnapshot, action: NextAction) {
-  const state = stateFor(action);
+  return stateColumns(s, stateFor(action));
+}
+
+function stateColumns(s: SyncSnapshot, state: SyncState) {
   return {
     state,
     cancelRequested: s.cancelRequested,
@@ -127,7 +136,7 @@ export class SyncProcessor {
     const finishedAt = new Date();
 
     await this.db.transaction((tx) =>
-      this.finishStep(tx, claim, begin.row, begin.action, outcome, startedAt, finishedAt),
+      this.finishStep(tx, claim, begin, outcome, startedAt, finishedAt),
     );
   }
 
@@ -178,18 +187,27 @@ export class SyncProcessor {
 
     // For a create, committing create_sent_at *before* the request is what makes a crash or
     // timeout recoverable: whoever touches this row next knows it must reconcile first.
-    await tx
+    // clock_timestamp() (not now(), the transaction start) so the settle window is measured from
+    // as close to the request leaving as possible; this is the last statement before commit.
+    const [stamped] = await tx
       .update(posSync)
       .set({
         state: stateFor(action),
-        ...(action.kind === 'create' ? { createSentAt: sql`now()` } : {}),
+        ...(action.kind === 'create' ? { createSentAt: sql`clock_timestamp()` } : {}),
         attemptCount: sql`${posSync.attemptCount} + 1`,
-        lastAttemptAt: sql`now()`,
+        lastAttemptAt: sql`clock_timestamp()`,
         updatedAt: sql`now()`,
       })
-      .where(eq(posSync.checkId, row.checkId));
+      .where(eq(posSync.checkId, row.checkId))
+      .returning({ requestStartedAt: posSync.lastAttemptAt });
 
-    return { kind: 'call', action, row, payload };
+    return {
+      kind: 'call',
+      action,
+      row,
+      payload,
+      requestStartedAt: stamped?.requestStartedAt ?? new Date(),
+    };
   }
 
   private async loadCreatePayload(tx: Tx, row: PosSyncRow): Promise<CreatePayload> {
@@ -231,12 +249,12 @@ export class SyncProcessor {
   private async finishStep(
     tx: Tx,
     claim: Claim,
-    startRow: PosSyncRow,
-    action: PosAction,
+    begin: Extract<Begin, { kind: 'call' }>,
     outcome: PosOutcome,
     startedAt: Date,
     finishedAt: Date,
   ): Promise<void> {
+    const { action, row: startRow } = begin;
     // The attempt happened regardless of who owns the row now; always record it.
     await tx.insert(posSyncAttempts).values({
       checkId: claim.checkId,
@@ -279,65 +297,34 @@ export class SyncProcessor {
     // Apply to the *fresh* row: a cancel may have been requested while the request was in flight.
     const result = applyOutcome(toSnapshot(row), action, outcome, {
       now,
+      requestStartedAt: begin.requestStartedAt,
       ambiguousSettleMs: w.ambiguousSettleMs,
       reconcileDelayMs: w.reconcileDelayMs,
     });
-    const next = nextAction(result.snapshot);
-    const failure = result.failure;
-    const consecutiveFailures = failure
-      ? row.consecutiveFailures + (failure.countsTowardLimit ? 1 : 0)
-      : 0;
-
-    let columns: Record<string, unknown> = snapshotColumns(result.snapshot, next);
-    let delayMs = result.delayMs;
-
-    if (failure) {
-      columns = { ...columns, ...errorColumns(failure) };
-      if (failure.countsTowardLimit) {
-        delayMs = Math.max(
-          delayMs,
-          backoffDelayMs(consecutiveFailures, w.backoffBaseMs, w.backoffMaxMs),
-        );
-      }
-      const stop = failure.permanent || consecutiveFailures >= w.maxConsecutiveFailures;
-      if (next.kind !== 'done' && stop) {
-        columns = {
-          ...columns,
-          state: 'failed',
-          completedAt: null,
-          ...(failure.permanent
-            ? {}
-            : {
-                lastErrorKind: 'retries_exhausted',
-                lastErrorMessage: `Gave up after ${consecutiveFailures} consecutive failures. Last: ${failure.kind}: ${failure.message}`,
-              }),
-        };
-        this.logger.warn(
-          `check ${claim.checkId}: sync stopped (${failure.kind}: ${failure.message})`,
-        );
-      }
+    const decision = decideStep(row.consecutiveFailures, action, result, w);
+    if (decision.state === 'failed') {
+      this.logger.warn(`check ${claim.checkId}: sync stopped (${decision.error?.message})`);
     }
 
     await tx
       .update(posSync)
       .set({
-        ...columns,
-        consecutiveFailures,
-        nextAttemptAt: sql`now() + make_interval(secs => ${delayMs / 1000})`,
+        ...stateColumns(decision.snapshot, decision.state),
+        ...(decision.error
+          ? {
+              lastErrorKind: decision.error.kind,
+              lastErrorMessage: decision.error.message,
+              lastErrorStatus: decision.error.status,
+              lastErrorAt: sql`now()`,
+            }
+          : {}),
+        consecutiveFailures: decision.consecutiveFailures,
+        nextAttemptAt: sql`now() + make_interval(secs => ${decision.delayMs / 1000})`,
         ...RELEASE_LEASE,
         updatedAt: sql`now()`,
       })
       .where(eq(posSync.checkId, claim.checkId));
   }
-}
-
-function errorColumns(failure: StepFailure) {
-  return {
-    lastErrorKind: failure.kind,
-    lastErrorMessage: failure.message,
-    lastErrorStatus: failure.status,
-    lastErrorAt: sql`now()`,
-  };
 }
 
 function describeOutcome(action: PosAction, outcome: PosOutcome): string {
