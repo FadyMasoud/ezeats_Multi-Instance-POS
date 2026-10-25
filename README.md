@@ -38,9 +38,13 @@ To turn on the POS failure modes, set them before starting:
 `FAIL_RATE=0.2 TIMEOUT_AFTER_CREATE_RATE=0.1 SLOW_RATE=0.2 docker compose up --build`.
 You can also change them at runtime with `POST :4000/debug/config`.
 
-> The compose path was written and its image contents were verified locally, but the authoring
-> machine had no Docker, so `docker compose up` itself was not run there. The local mode below and
-> the CI workflow cover the same code.
+Verified on Docker Desktop 29.6 (Windows 11, Compose v5.2): every service healthy, `migrate`
+exits 0, and the admin UI lists checks, filters "Failed sync" and retries through nginx.
+
+> **Behind a TLS-inspecting proxy or antivirus** (e.g. Avast Web Shield), `npm ci` inside the
+> image cannot verify the registry certificate. Pass that root CA as the optional `npm_ca` build
+> secret: a compose override with `build: { secrets: [npm_ca] }` on each built service and a
+> top-level `secrets: { npm_ca: { file: <path to the CA .pem> } }`.
 
 ## Tests
 
@@ -71,9 +75,9 @@ first: `docker compose exec postgres createdb -U ezeats ezeats_test`.
 
 It exits non-zero on any violation.
 
-Latest local result: passed. 160 kept checks → 160 open orders, 40 cancelled → 0 open, 0
-duplicates, settled in about 40 s. Pay latency p95 298 ms, max 472 ms. See
-[DECISIONS.md](DECISIONS.md#measured-honestly).
+Latest Docker-mode results: four runs in a row passed. 160 kept checks → 160 open orders, 40
+cancelled → 0 open, 0 duplicates, 0 orphans, settled in 36–68 s. Pay latency p95 58–104 ms, max
+83–136 ms (successful attempt; failover from the killed instance took up to 7.5 s). See [DECISIONS.md](DECISIONS.md#measured-honestly).
 
 ## Local development without Docker
 
@@ -145,6 +149,7 @@ was used on this codebase and found a real duplicate-order bug (AI_NOTES #1).
 ## Known limitations
 
 - Exactly-once depends on the POS lookup being truthful. See DECISIONS.md, "Risk that remains".
-- The pay p100 latency exceeded 300 ms under the 20-client chaos load on one machine.
+- In local chaos mode (every process on one laptop) the pay p100 exceeded 300 ms under the
+  20-client load. In Docker mode it stayed under 140 ms (successful attempt).
 - The operator token is a local-development stand-in, not authentication.
 - The fake POS keeps its orders in memory; restarting it loses them.

@@ -110,23 +110,22 @@ the cancel is carried out.
 
 ## Measured, honestly
 
-Three local chaos runs (200 checks, 20% fail, 10% timeout-after-create, 20% slow, `api-1` force
-killed mid-run and restarted) passed the three POS invariants. The latest run also failed on any
-duplicate create, and found none.
+Chaos runs (200 checks, 20% fail, 10% timeout-after-create, 20% slow, `api-1` SIGKILLed mid-run
+and restarted, 20 concurrent clients) passed the three POS invariants and found no duplicate
+create, in both modes:
 
-`POST /pay` latency in the latest run, with 20 concurrent clients during the kill and every
-service on one laptop:
+| `POST /pay` latency (successful attempt; logged, not asserted) | p50 | p95 | max |
+|---|---|---|---|
+| Local mode, every process on one laptop (latest of 3 runs) | 114 ms | 298 ms | 472 ms |
+| Docker Compose, Docker Desktop on Windows (4 runs in a row) | 34–42 ms | 58–104 ms | 83–136 ms |
 
-| | Latency |
-|---|---|
-| p50 | 114 ms |
-| p95 | 298 ms |
-| max | 472 ms |
-
-So **the < 300 ms guarantee is not met at the tail under that load**. Integration tests (POS down,
-or slow) stay under 300 ms. The Docker Compose path was written but could not be run on the
-authoring machine (no Docker). Its runtime image contents were verified by running the
-production-only install against a fresh database.
+So the < 300 ms guarantee held in Docker mode over these runs. Counting the client's failover
+from the killed instance to the surviving one, the slowest pay took 7.5 s: it reached `api-1` as it died and waited for that connection to fail. In local mode it was **not met at the tail**,
+because the APIs, Postgres, the POS and the client all competed for one machine. The first Docker
+run reported p95 664 ms. That was the test's own stopwatch: it killed `api-1` with a blocking
+`execSync`, which froze the client for about 1 s and charged that second to every request in
+flight. It now runs the command asynchronously. Integration tests (POS down, or slow) stay under
+300 ms.
 
 ## At 100× volume
 
@@ -143,7 +142,7 @@ production-only install against a fresh database.
 
 ## With another day
 
-- Run the Docker chaos path in CI.
+- Confirm the CI `chaos` job (Docker mode) passes on GitHub; it has not been seen to run.
 - Add a post-sync verification lookup to catch late duplicates.
 - Cut `pay` to one round trip, and profile its tail latency on separate hosts.
 - Add real operator auth with an audit log of manual retries.

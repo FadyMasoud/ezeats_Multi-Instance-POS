@@ -326,8 +326,13 @@ From run 2 on, latency is measured on the successful attempt. The figure includi
 the surviving instance is logged separately. The tail above 300 ms comes from 20 concurrent
 clients, plus the kill and every service sharing one laptop. It is **reported, not hidden**: under
 that load the < 300 ms guarantee holds for p95 but not for the maximum. Sequential pay with the
-POS down or slow stays under 300 ms in the integration tests. The Docker mode of the chaos test
-runs in CI; it could not be executed on the authoring machine.
+POS down or slow stays under 300 ms in the integration tests.
+
+**Observed (Docker mode, Docker Desktop on Windows, 2 API containers):** four runs in a row
+passed (160/160 open, 40 cancelled with none open, 0 duplicates, 0 orphans), settling in 36–68 s,
+with pay p50 / p95 / max of 34–42 / 58–104 / 83–136 ms (successful attempt; up to 7.5 s including failover). An earlier Docker run reported p95 664 ms,
+but that came from the chaos client blocking its own event loop on a synchronous
+`docker compose kill`. It now runs docker commands asynchronously.
 
 # 15. Security and Claude Code setup
 
@@ -377,7 +382,7 @@ runs in CI; it could not be executed on the authoring machine.
 
 **Next steps:**
 
-- Run the Docker chaos test in CI.
+- Confirm the CI `chaos` job (Docker mode) passes on GitHub; it exists but has not been seen to run.
 - Add a verification lookup after sync to catch late duplicates.
 - Cut `pay` to one round trip and profile it on separate hosts.
 - Add real operator authentication and an audit log.
