@@ -61,19 +61,28 @@ function dockerAvailable(): boolean {
 
 class DockerCluster implements Cluster {
   private readonly services = ['api-1', 'api-2'];
-  private sh(cmd: string) {
+  /**
+   * Async on purpose: kill/start run while payments are in flight, and a blocking execSync
+   * (~1 s for `docker compose kill`) froze this process, adding that second to every in-flight
+   * request's measured pay latency.
+   */
+  private sh(cmd: string): Promise<void> {
     log(`$ ${cmd}`);
-    execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
+    return new Promise((done, fail) => {
+      spawn(cmd, { cwd: ROOT, stdio: 'inherit', shell: true })
+        .on('error', fail)
+        .on('exit', (code) => (code === 0 ? done() : fail(new Error(`${cmd} exited ${code}`))));
+    });
   }
   async start() {
     // No --wait: the one-shot migrate service exits by design; health is awaited over HTTP below.
-    this.sh('docker compose up -d --build');
+    await this.sh('docker compose up -d --build');
   }
   async kill(i: number) {
-    this.sh(`docker compose kill -s SIGKILL ${this.services[i]}`);
+    await this.sh(`docker compose kill -s SIGKILL ${this.services[i]}`);
   }
   async restart(i: number) {
-    this.sh(`docker compose start ${this.services[i]}`);
+    await this.sh(`docker compose start ${this.services[i]}`);
   }
   async stop() {
     log('docker stack left running (docker compose down to stop it)');
@@ -313,14 +322,16 @@ async function main() {
       if (paid === killAt) {
         log(`SIGKILL api-1 after ${paid} payments`);
         await cluster.kill(0);
-        restarts.push(
-          sleep(SETTINGS.restartAfterMs).then(async () => {
-            log('restarting api-1');
-            await cluster.restart(0);
-            await waitHealthy([API_URLS[0] ?? '']);
-            log('api-1 healthy again');
-          }),
-        );
+        const restart = sleep(SETTINGS.restartAfterMs).then(async () => {
+          log('restarting api-1');
+          await cluster.restart(0);
+          await waitHealthy([API_URLS[0] ?? '']);
+          log('api-1 healthy again');
+        });
+        // A failure is rethrown by Promise.all(restarts) below; without this it would crash the
+        // process as an unhandled rejection first, skipping the result log.
+        restart.catch(() => {});
+        restarts.push(restart);
       }
       if (toCancel.has(id)) {
         // Half are cancelled immediately (racing the create), half after it probably synced.
