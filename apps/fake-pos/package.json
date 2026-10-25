@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts"
+    "dev": "tsc -p tsconfig.build.json && node dist/main.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

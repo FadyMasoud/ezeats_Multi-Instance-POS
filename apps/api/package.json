@@ -10,7 +10,7 @@
     "migrate": "tsx src/db/migrate.ts",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check && node scripts/check-migration-drift.mjs",
-    "dev": "tsx watch src/main.ts"
+    "dev": "tsc -p tsconfig.build.json && node dist/main.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
