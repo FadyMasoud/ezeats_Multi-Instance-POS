@@ -9,7 +9,10 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/fake-pos/package.json apps/fake-pos/
 COPY apps/admin/package.json apps/admin/
-RUN npm ci --no-audit --no-fund
+# Optional build secret `npm_ca`: the root CA of a TLS-inspecting proxy/antivirus, if the build
+# network has one (see README). npm can exit 0 after a failed install, so `npm ls` makes it fatal.
+RUN --mount=type=secret,id=npm_ca,required=false \
+    NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca npm ci --no-audit --no-fund && npm ls >/dev/null
 
 FROM deps AS build
 COPY tsconfig.base.json ./
@@ -22,7 +25,9 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/fake-pos/package.json apps/fake-pos/
 COPY apps/admin/package.json apps/admin/
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+RUN --mount=type=secret,id=npm_ca,required=false \
+    NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm ls --omit=dev >/dev/null
 
 FROM node:20-alpine AS api
 WORKDIR /repo
